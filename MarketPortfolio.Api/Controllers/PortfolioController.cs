@@ -7,24 +7,22 @@ namespace MarketPortfolio.Api.Controllers
     [Route("api/[controller]")]
     public class PortfolioController : ControllerBase
     {
-        private readonly PortfolioManagementService _portfolioService;
+        private readonly PortfolioManagerService _managerService;
 
-        // Constructor Injection: The DI container provides the service automatically
-        public PortfolioController(PortfolioManagementService portfolioService)
+        // Constructor Injection: Both services are automatically provided by the DI container
+        public PortfolioController(PortfolioManagerService managerService)
         {
-            _portfolioService = portfolioService;
+            _managerService = managerService;
         }
 
         [HttpPost("stocks")]
         public async Task<IActionResult> AddStock([FromBody] AddStockRequest request, CancellationToken cancellationToken)
         {
-            // In the real app, we will extract this from the JWT token claims.
-            // For testing the architecture now, we simulate a logged-in user ID.
             var userId = Guid.Parse("00000000-0000-0000-0000-000000000001"); 
 
             try
             {
-                await _portfolioService.AddStockToPortfolioAsync(
+                await _managerService.AddStockToPortfolioAsync(
                     userId, 
                     request.Ticker, 
                     request.PurchasePrice, 
@@ -36,8 +34,6 @@ namespace MarketPortfolio.Api.Controllers
             }
             catch (InvalidOperationException ex)
             {
-                // This catches our business rule violation (e.g., "Free tier limit reached")
-                // and translates it into an HTTP 400 Bad Request.
                 return BadRequest(new { Error = ex.Message });
             }
             catch (UnauthorizedAccessException ex)
@@ -46,17 +42,35 @@ namespace MarketPortfolio.Api.Controllers
             }
             catch (Exception ex)
             {
-                // Catch-all for unexpected database or server errors
-                return StatusCode(500, new { 
-                    Error = ex.Message, 
-                    InnerDetails = ex.InnerException?.Message 
+                return StatusCode(500, new { Error = ex.Message });
+            }
+        }
+
+        // --- NEW GET ENDPOINT FOR LIVE VALUATION ---
+        [HttpGet("value")]
+        public async Task<IActionResult> GetPortfolioValue(CancellationToken cancellationToken)
+        {
+            var userId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+
+            try
+            {
+                // Calls the external market client via the service layer
+                decimal totalValue = await _managerService.CalculateTotalPortfolioValueAsync(userId, cancellationToken);
+
+                return Ok(new { 
+                    UserId = userId, 
+                    Currency = "USD", 
+                    TotalNetWorth = totalValue,
+                    Timestamp = DateTime.UtcNow 
                 });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { Error = "Failed to calculate live portfolio value.", Details = ex.Message });
             }
         }
     }
 
-    // Data Transfer Object (DTO): Defines the exact JSON structure the client must send.
-    // Placing this in the API layer keeps the Domain layer free of HTTP concerns.
     public class AddStockRequest
     {
         public string Ticker { get; set; } = string.Empty;
